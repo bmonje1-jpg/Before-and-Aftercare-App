@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Before and Aftercare Attendance</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.9.0/dist/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+body { font-family: Arial, sans-serif; margin: 20px; }
+h1 { text-align: center; }
+.top-bar { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.controls { display: flex; justify-content: space-between; margin-bottom: 10px; }
+table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+button { padding: 5px 10px; margin: 2px; border-radius: 6px; cursor: pointer; }
+.btn-blue { background-color: #007bff; color: white; font-size: 14px; }
+.btn-gray { background-color: #6c757d; color: white; }
+.count { font-weight: bold; margin-top: 10px; }
+.import-section { border: 1px solid #ccc; padding: 10px; margin-top: 20px; }
+</style>
+</head>
+<body>
+
+<h1>Before and Aftercare Attendance</h1>
+
+<div class="top-bar">
+  <div>
+    <label>Teacher Name: <input type="text" id="teacherName"></label>
+    <label>Care Type: 
+      <select id="careType">
+        <option value="">Select</option>
+        <option value="Beforecare">Beforecare</option>
+        <option value="Aftercare">Aftercare</option>
+      </select>
+    </label>
+  </div>
+  <div>
+    <h3>Today's Date: <span id="currentDate"></span></h3>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="btn-gray" onclick="addStudent()">Add Student</button>
+  <div>
+    <button class="btn-gray" onclick="exportData('daily')">Export Daily</button>
+    <button class="btn-gray" onclick="exportData('weekly')">Export Weekly</button>
+    <button class="btn-gray" onclick="exportData('monthly')">Export Monthly</button>
+    <button class="btn-gray" onclick="generateDailyPDF()">Daily Report</button>
+  </div>
+</div>
+
+<div class="count">Total Checked In: <span id="checkedInCount">0</span></div>
+
+<table id="attendanceTable">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>First Name</th>
+      <th>Last Name</th>
+      <th>Actions</th>
+      <th>Check-In</th>
+      <th>Check-Out</th>
+      <th>Parent</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<div class="import-section">
+  <h3>Import Students</h3>
+  <input type="file" id="importFile" accept=".xlsx, .xls">
+  <button class="btn-gray" onclick="importStudents()">Import</button>
+</div>
+
+<script>
+// --- Supabase Setup ---
+const SUPABASE_URL = 'https://esvtznwigplxzzebckhh.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzdnR6bndpZ3BseHp6ZWJja2hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU4MDk1OTQsImV4cCI6MjA3MTM4NTU5NH0.E10adSAZhENEoP_xbAvGpW8GdJH73QJ8KX7PaD8hBGw';
+const supabase = supabaseJs.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let students = [];
+document.getElementById("currentDate").textContent = new Date().toLocaleDateString();
+
+// --- Fetch Students and Parents ---
+async function fetchStudents() {
+  const { data: studentRows, error } = await supabase
+    .from('attendance')
+    .select('*')
+    .order('last_name', { ascending: true });
+  if(error) { console.error(error); return; }
+
+  for(let s of studentRows){
+    const { data: parentRows } = await supabase
+      .from('parents')
+      .select('*')
+      .eq('student_id', s.id);
+    s.parents = parentRows.map(p => p.parent_name);
+  }
+  students = studentRows;
+  renderTable();
+}
+
+// --- Render Table ---
+function renderTable() {
+  const tableBody = document.querySelector("#attendanceTable tbody");
+  tableBody.innerHTML = "";
+  let checkedInCount = 0;
+
+  students.forEach((s,i)=>{
+    const row = document.createElement("tr");
+    if(s.check_in && !s.check_out) { row.style.backgroundColor = "#d4edda"; checkedInCount++; }
+    else if(s.check_out) { row.style.backgroundColor = "#f8d7da"; }
+    row.innerHTML = `
+      <td>${i+1}</td>
+      <td>${s.first_name}</td>
+      <td>${s.last_name}</td>
+      <td>
+        <button class="btn-blue" onclick="checkIn(${i})">Check In</button>
+        <button class="btn-blue" onclick="checkOut(${i})">Check Out</button>
+        <button class="btn-gray" onclick="deleteStudent(${i})">Delete</button>
+      </td>
+      <td>${s.check_in ? s.check_in + " (" + (s.teacher||"") + ")" : ""}</td>
+      <td>${s.check_out ? s.check_out + " (" + (s.selectedParent||"") + ")" : ""}</td>
+      <td>
+        <select onchange="selectParent(${i}, this.value)">
+          <option value="">Select Parent</option>
+          ${s.parents.map(p=>`<option value="${p}" ${s.selectedParent===p?'selected':''}>${p}</option>`).join('')}
+        </select>
+        <button class="btn-gray" onclick="addParent(${i})">New Parent</button>
+      </td>
+    `;
+    tableBody.appendChild(row);
+  });
+  document.getElementById("checkedInCount").textContent = checkedInCount;
+}
+
+// --- Add Student ---
+async function addStudent(){
+  const firstName = prompt("Enter first name:");
+  const lastName = prompt("Enter last name:");
+  if(!firstName || !lastName) return;
+  const { data, error } = await supabase.from('attendance').insert([{first_name:firstName,last_name:lastName}]);
+  if(error){ alert(error.message); return; }
+  fetchStudents();
+}
+
+// --- Delete Student ---
+async function deleteStudent(i){
+  if(!confirm("Delete this student permanently?")) return;
+  const student = students[i];
+  const { error } = await supabase.from('attendance').delete().eq('id',student.id);
+  if(error){ alert(error.message); return; }
+  fetchStudents();
+}
+
+// --- Add Parent ---
+async function addParent(i){
+  const name = prompt("Enter parent's name:");
+  if(!name) return;
+  const student = students[i];
+  const { error } = await supabase.from('parents').insert([{student_id: student.id, parent_name: name}]);
+  if(error){ alert(error.message); return; }
+  fetchStudents();
+}
+
+// --- Select Parent ---
+function selectParent(i,value){ students[i].selectedParent=value; }
+
+// --- Check In ---
+async function checkIn(i){
+  if(!teacherNameInput.value || !careTypeSelect.value){ alert("Enter teacher name and care type first!"); return; }
+  const student = students[i];
+  const { error } = await supabase.from('attendance').update({
+    check_in: new Date().toLocaleTimeString(),
+    teacher: teacherNameInput.value,
+    care_type: careTypeSelect.value,
+    date: new Date().toLocaleDateString()
+  }).eq('id',student.id);
+  if(error){ alert(error.message); return; }
+  fetchStudents();
+}
+
+// --- Check Out ---
+async function checkOut(i){
+  const student = students[i];
+  if(!student.check_in){ alert("Must check in first!"); return; }
+  if(!student.selectedParent){ alert("Select a parent first!"); return; }
+  const { error } = await supabase.from('attendance').update({
+    check_out: new Date().toLocaleTimeString()
+  }).eq('id',student.id);
+  if(error){ alert(error.message); return; }
+  fetchStudents();
+}
+
+// --- Import Students (Excel) ---
+function importStudents(){
+  const file = document.getElementById("importFile").files[0];
+  if(!file){ alert("Select a file"); return; }
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const data = new Uint8Array(e.target.result);
+    const wb = XLSX.read(data,{type:"array"});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws);
+    for(let r of rows){
+      if(r["First Name"] && r["Last Name"]){
+        await supabase.from('attendance').insert([{first_name:r["First Name"], last_name:r["Last Name"]}]);
+      }
+    }
+    fetchStudents();
+  }
+  reader.readAsArrayBuffer(file);
+}
+
+// --- Excel Export ---
+async function exportData(type){
+  const { data: allStudents } = await supabase.from('attendance').select('*');
+  const exportRows = allStudents.map((s,i)=>({
+    Count: i+1,
+    "First Name": s.first_name,
+    "Last Name": s.last_name,
+    Date: s.date||"",
+    "Check-In": s.check_in ? s.check_in + " (" + (s.teacher||"") + ")" : "",
+    "Check-Out": s.check_out ? s.check_out + " (" + (s.selectedParent||"") + ")" : "",
+    Teacher: s.teacher||"",
+    "Care Type": s.care_type||"",
+    Parent: s.selectedParent||""
+  }));
+  const ws = XLSX.utils.json_to_sheet(exportRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws,"Attendance");
+  XLSX.writeFile(wb, `Attendance-${type}-${new Date().toLocaleDateString()}.xlsx`);
+}
+
+// --- Daily PDF ---
+async function generateDailyPDF(){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const todayStr = new Date().toLocaleDateString();
+  const { data: dailyStudents } = await supabase.from('attendance').select('*').eq('date',todayStr);
+  doc.setFontSize(16); doc.text("Daily Attendance Report",14,20);
+  doc.setFontSize(12); 
+  doc.text(`Date: ${todayStr}`,14,30);
+  doc.text(`Teacher: ${teacherNameInput.value || ''}`,14,36);
+  doc.text(`Care Type: ${careTypeSelect.value || ''}`,14,42);
+
+  const headers = ["#", "First Name", "Last Name", "Check-In", "Check-Out", "Parent"];
+  let startY = 50, rowHeight = 8;
+  headers.forEach((h,i)=> doc.text(h, 14 + i*30, startY));
+  startY += rowHeight;
+
+  dailyStudents.forEach((s,i)=>{
+    const row = [
+      i+1, s.first_name, s.last_name,
+      s.check_in ? s.check_in + " (" + (s.teacher||"") + ")" : "",
+      s.check_out ? s.check_out + " (" + (s.selectedParent||"") + ")" : "",
+      s.selectedParent || ""
+    ];
+    row.forEach((cell,j)=> doc.text(String(cell), 14+j*30, startY));
+    startY+=rowHeight;
+    if(startY>280){ doc.addPage(); startY=20; }
+  });
+  doc.save(`Daily_Report_${todayStr}.pdf`);
+}
+
+// --- Initial Load ---
+document.addEventListener("DOMContentLoaded",fetchStudents);
+</script>
+</body>
+</html>
+
