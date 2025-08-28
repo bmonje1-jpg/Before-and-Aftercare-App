@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before & After Care Attendance</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+<style>
+body { font-family: Arial, sans-serif; margin: 20px; }
+header { text-align: center; margin-bottom: 20px; }
+.top-bar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+.left-panel, .center-panel, .right-panel { display: flex; flex-direction: column; gap: 10px; }
+input, select, button { padding: 5px; margin-right: 5px; }
+button { cursor: pointer; }
+.check-btn { background-color: #007BFF; color: white; border: none; font-size: 16px; padding: 8px 15px; margin-right: 5px; border-radius: 5px; }
+.clear-btn, .delete-btn, .small-btn { background-color: #ccc; color: black; border: none; font-size: 12px; padding: 4px 8px; border-radius: 3px; margin-right: 5px; }
+.daily-report-btn { background-color:#f8d7da; color:#721c24; }
+.reset-btn { background-color: #dc3545; color: white; border: none; font-size: 12px; padding: 6px 10px; border-radius: 5px; cursor: pointer; transition: background-color 0.2s ease; }
+.reset-btn:hover { background-color: #b52a37; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+.checked-in { background-color: #d4edda; }
+.checked-out { background-color: #f8d7da; }
+.import-section { border: 2px solid #007BFF; padding: 20px; text-align: center; width: 50%; margin: 30px auto 0 auto; border-radius: 10px; }
+.export-buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 5px; flex-wrap: wrap; }
+/* Check-in counter styles */
+.checkin-counter {
+    font-size: 20px;
+    font-weight: bold;
+    padding: 8px 15px;
+    border-radius: 8px;
+    text-align: center;
+    display: inline-block;
+    min-width: 140px;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+}
+.checkin-green {
+    color: #155724;
+    background-color: #d4edda;
+    border-color: #c3e6cb;
+}
+.checkin-red {
+    color: #721c24;
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+}
+/* Modal styles */
+#reportModal {
+    display:none; 
+    position:fixed; top:0; left:0; width:100%; height:100%; 
+    background:rgba(0,0,0,0.5); justify-content:center; align-items:center; z-index:1000;
+}
+#reportModal div {
+    background:white; padding:20px; border-radius:10px; text-align:center; min-width:200px;
+}
+#reportModal button { margin:5px; padding:6px 12px; font-size:14px; cursor:pointer; border-radius:5px; }
+</style>
+</head>
+<body>
+
+<header>
+    <h1>Before & After Care Attendance</h1>
+</header>
+
+<div class="top-bar">
+    <div class="left-panel">
+        <label>Teacher Name: <input type="text" id="teacherName" placeholder="Full Name"></label>
+        <button style="background-color:#007BFF; color:white; font-size:16px; padding:8px 15px; border-radius:5px;" onclick="addStudentPrompt()">Add Student</button>
+    </div>
+    <div class="center-panel" style="align-items:center;">
+        <div id="checkinCounter" class="checkin-counter checkin-red">
+            Checked In: <span id="checkedInCount">0</span>
+        </div>
+    </div>
+    <div class="right-panel" style="align-items:flex-end;">
+        <div>
+            <strong>Today's Date:</strong> <span id="currentDate"></span>
+        </div>
+        <div class="export-buttons">
+            <button class="daily-report-btn" onclick="chooseReportType()">Export</button>
+            <button class="reset-btn" onclick="manualReset()">⚠ Clear Timestamps</button>
+            <button class="reset-btn" onclick="deleteAllStudents()">🗑 Delete All Students</button>
+        </div>
+    </div>
+</div>
+
+<table id="attendanceTable">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>First Name</th>
+            <th>Last Name</th>
+            <th>Actions</th>
+            <th>Check-In</th>
+            <th>Check-Out</th>
+            <th>Parent</th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
+<div class="import-section">
+    <h3>Import Students from Excel</h3>
+    <input type="file" id="excelFile" accept=".xlsx,.xls">
+    <button onclick="importExcel()">Import Excel</button>
+</div>
+
+<!-- Report Modal -->
+<div id="reportModal">
+  <div>
+    <h3>Select Export Type</h3>
+    <button onclick="exportPDF('daily'); closeModal()">PDF - Daily</button>
+    <button onclick="exportPDF('weekly'); closeModal()">PDF - Weekly</button>
+    <button onclick="exportPDF('monthly'); closeModal()">PDF - Monthly</button>
+    <button onclick="exportPDF('lastMonth'); closeModal()">PDF - Last Month</button>
+    <button onclick="exportAttendance('daily'); closeModal()">Excel - Daily</button>
+    <button onclick="exportAttendance('weekly'); closeModal()">Excel - Weekly</button>
+    <button onclick="exportAttendance('monthly'); closeModal()">Excel - Monthly</button>
+    <button onclick="exportAttendance('lastMonth'); closeModal()">Excel - Last Month</button>
+    <button onclick="closeModal()">Cancel</button>
+  </div>
+</div>
+
+<script>
+/* ---------------- Supabase Setup ---------------- */
+const SUPABASE_URL = 'https://gaaqhwkxypzxejerjwqc.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdhYXFod2t4eXB6eGVqZXJqd3FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzNDAwMTUsImV4cCI6MjA3MTkxNjAxNX0.yshLqnf9o0JQ_1QGPuhpeYgDloRHmeqMMX6WxT_3mbQ';
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ---------------- State ---------------- */
+let attendanceData = [];
+const attendanceTable = document.getElementById('attendanceTable').querySelector('tbody');
+const teacherNameInput = document.getElementById('teacherName');
+
+/* ---------------- Date & Counter ---------------- */
+function updateDate() {
+    const today = new Date();
+    document.getElementById('currentDate').innerText = today.toDateString();
+}
+updateDate();
+
+function updateCounts() {
+    let checkedIn = attendanceData.filter(s => s.check_in && !s.check_out).length;
+    document.getElementById('checkedInCount').innerText = checkedIn;
+    const counterDiv = document.getElementById('checkinCounter');
+    counterDiv.classList.toggle('checkin-green', checkedIn > 0);
+    counterDiv.classList.toggle('checkin-red', checkedIn === 0);
+}
+
+function getTeacherInitials() {
+    const name = teacherNameInput.value.trim();
+    return name ? name.split(' ').map(p=>p[0].toUpperCase()).join('') : '';
+}
+
+/* ---------------- CRUD Functions ---------------- */
+async function fetchData() {
+    const { data: students } = await supabase.from('students').select('*').order('id');
+    const { data: attendance } = await supabase.from('attendance').select('*');
+    attendanceData = students.map(s => {
+        const record = attendance.find(a => a.student_id === s.id) || {};
+        return {
+            id: s.id,
+            first_name: s.first_name,
+            last_name: s.last_name,
+            check_in: record.check_in ? new Date(record.check_in).toLocaleTimeString() : '',
+            check_out: record.check_out ? new Date(record.check_out).toLocaleTimeString() : '',
+            check_in_time: record.check_in,
+            check_out_time: record.check_out,
+            parents: record.parent ? [record.parent] : [],
+            selectedParent: record.parent || ''
+        }
+    });
+    renderTable();
+}
+
+async function addStudent(first, last) {
+    const { data, error } = await supabase.from('students').insert({ first_name: first, last_name: last }).select();
+    if (error) { alert(error.message); return; }
+    attendanceData.push({ id: data[0].id, first_name: first, last_name: last, check_in: '', check_out: '', parents: [], selectedParent: '' });
+    renderTable();
+}
+
+async function checkIn(id) {
+    const student = attendanceData.find(s=>s.id===id);
+    const teacherInitials = getTeacherInitials();
+    if(!teacherInitials){ alert("Enter teacher name first"); return; }
+    const time = new Date().toISOString();
+    await supabase.from('attendance').upsert({ student_id: id, check_in: time, teacher: teacherInitials }, { onConflict: 'student_id' });
+    student.check_in = new Date(time).toLocaleTimeString() + ` (${teacherInitials})`;
+    student.check_out = '';
+    student.check_in_time = time;
+    renderTable();
+}
+
+async function checkOut(id) {
+    const student = attendanceData.find(s=>s.id===id);
+    const teacherInitials = getTeacherInitials();
+    if(!teacherInitials || !student.selectedParent){ alert("Enter teacher and parent"); return; }
+    const time = new Date().toISOString();
+    await supabase.from('attendance').upsert({ student_id: id, check_out: time, teacher: teacherInitials, parent: student.selectedParent }, { onConflict: 'student_id' });
+    student.check_out = new Date(time).toLocaleTimeString() + ` (${teacherInitials} / ${student.selectedParent})`;
+    student.check_out_time = time;
+    renderTable();
+}
+
+async function deleteStudent(id) {
+    if(confirm("Delete this student?")) {
+        await supabase.from('attendance').delete().eq('student_id', id);
+        await supabase.from('students').delete().eq('id', id);
+        attendanceData = attendanceData.filter(s=>s.id!==id);
+        renderTable();
+    }
+}
+
+async function deleteAllStudents() {
+    if(confirm("Delete ALL students?")) {
+        await supabase.from('attendance').delete();
+        await supabase.from('students').delete();
+        attendanceData = [];
+        renderTable();
+    }
+}
+
+/* ---------------- Render Table ---------------- */
+function renderTable() {
+    attendanceTable.innerHTML = '';
+    attendanceData.forEach((s, index)=>{
+        const row = attendanceTable.insertRow();
+        row.id = 'student-'+s.id;
+        if(s.check_in && !s.check_out) row.classList.add('checked-in');
+        if(s.check_out) row.classList.add('checked-out');
+        row.innerHTML = `
+            <td>${index+1}</td>
+            <td>${s.first_name}</td>
+            <td>${s.last_name}</td>
+            <td>
+                <button class="check-btn" onclick="checkIn(${s.id})">Check In ⬆️</button>
+                <button class="check-btn" onclick="checkOut(${s.id})">Check Out ⬇️</button>
+                <button class="delete-btn" onclick="deleteStudent(${s.id})">Delete</button>
+            </td>
+            <td>${s.check_in}</td>
+            <td>${s.check_out}</td>
+            <td>
+                <select class="parent-select" onchange="s.selectedParent=this.value; renderTable();">
+                    <option value="">Select Parent</option>
+                    ${s.parents.map(p=>`<option value="${p}" ${p===s.selectedParent?'selected':''}>${p}</option>`).join('')}
+                </select>
+                <button class="small-btn" onclick="addParent(${s.id})">Add Parent</button>
+            </td>
+        `;
+    });
+    updateCounts();
+}
+
+function addParent(id){
+    const name = prompt("Enter parent's name:");
+    if(!name) return;
+    const student = attendanceData.find(s=>s.id===id);
+    if(!student.parents.includes(name)) student.parents.push(name);
+    student.selectedParent = name;
+    renderTable();
+}
+
+/* ---------------- Export Functions ---------------- */
+function chooseReportType(){ document.getElementById('reportModal').style.display='flex'; }
+function closeModal(){ document.getElementById('reportModal').style.display='none'; }
+
+function filterAttendance(range){
+    const now = new Date();
+    return attendanceData.filter(a=>{
+        const ci = a.check_in_time ? new Date(a.check_in_time) : null;
+        if(!ci) return false;
+        switch(range){
+            case'daily': return ci.toDateString()===now.toDateString();
+            case'weekly': {
+                const day = now.getDay();
+                const start = new Date(now); start.setDate(now.getDate()-day+1);
+                const end = new Date(start); end.setDate(start.getDate()+4);
+                return ci>=start && ci<=end;
+            }
+            case'monthly': return ci.getMonth()===now.getMonth() && ci.getFullYear()===now.getFullYear();
+            case'lastMonth': {
+                const lastMonth = new Date(now.getFullYear(), now.getMonth()-1, 1);
+                return ci.getMonth()===lastMonth.getMonth() && ci.getFullYear()===lastMonth.getFullYear();
+            }
+        }
+    });
+}
+
+function exportAttendance(type){
+    const data = filterAttendance(type).map(s=>({
+        'First Name': s.first_name,
+        'Last Name': s.last_name,
+        'Check-In': s.check_in,
+        'Check-Out': s.check_out,
+        'Parent': s.selectedParent,
+        'Teacher': s.check_in ? s.check_in.split(' ')[1].replace(/[()]/g,'') : ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    XLSX.writeFile(wb, `Attendance_${type}.xlsx`);
+}
+
+function exportPDF(type){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const data = filterAttendance(type);
+    doc.setFontSize(16);
+    doc.text(`Attendance Report - ${type}`, 10, 20);
+    doc.setFontSize(12);
+    const headers=["#","First Name","Last Name","Check-In","Check-Out","Parent","Teacher"];
+    const rows = data.map((s,i)=>[i+1,s.first_name,s.last_name,s.check_in,s.check_out,s.selectedParent,s.check_in?s.check_in.split(' ')[1].replace(/[()]/g,''):'']);
+    doc.autoTable({ head:[headers], body:rows, startY:30 });
+    doc.save(`Attendance_${type}.pdf`);
+}
+
+/* ---------------- Add Student Prompt ---------------- */
+function addStudentPrompt(){
+    const full = prompt("Enter full name:");
+    if(!full) return;
+    const parts = full.trim().split(' ');
+    if(parts.length<2){ alert("Enter first and last name"); return; }
+    addStudent(parts[0], parts.slice(1).join(''));
+}
+
+/* ---------------- Excel Import ---------------- */
+function importExcel(){
+    const file = document.getElementById('excelFile').files[0];
+    if(!file){ alert("Select file"); return; }
+    const reader = new FileReader();
+    reader.onload=(e)=>{
+        try{
+            const data = new Uint8Array(e.target.result);
+            const wb = XLSX.read(data,{type:'array'});
+            const sheet = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+            if(!sheet[0]['First Name'] || !sheet[0]['Last Name']) throw "Invalid format";
+            sheet.forEach(r=>addStudent(r['First Name'], r['Last Name']));
+        }catch(err){
+            alert("Invalid Excel format. Columns must be 'First Name' and 'Last Name'. Please import again.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+/* ---------------- Clear Timestamps ---------------- */
+async function manualReset(){
+    if(confirm("Clear all timestamps?")){
+        for(const s of attendanceData){
+            s.check_in=''; s.check_out=''; s.check_in_time=''; s.check_out_time='';
+            await supabase.from('attendance').update({check_in:null,check_out:null}).eq('student_id',s.id);
+        }
+        renderTable();
+    }
+}
+
+/* ---------------- Init ---------------- */
+fetchData();
+</script>
+
+</body>
+</html>
