@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before & After Care Attendance</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+<script type="module">
+import { supabase } from './supabase.js';
+
+/* ---------------- State ---------------- */
+let attendanceData = [];
+const attendanceTable = document.getElementById('attendanceTable').querySelector('tbody');
+const teacherNameInput = document.getElementById('teacherName');
+
+/* ---------------- Date & Counter ---------------- */
+function updateDate() {
+    const today = new Date();
+    document.getElementById('currentDate').innerText = today.toDateString();
+}
+updateDate();
+
+function updateCounts() {
+    let checkedIn = attendanceData.filter(s => s.check_in && !s.check_out).length;
+    document.getElementById('checkedInCount').innerText = checkedIn;
+    const counterDiv = document.getElementById('checkinCounter');
+    counterDiv.classList.toggle('checkin-green', checkedIn > 0);
+    counterDiv.classList.toggle('checkin-red', checkedIn === 0);
+}
+
+function getTeacherInitials() {
+    const name = teacherNameInput.value.trim();
+    return name ? name.split(' ').map(p=>p[0].toUpperCase()).join('') : '';
+}
+
+/* ---------------- CRUD Functions ---------------- */
+async function fetchData() {
+    const { data: students } = await supabase.from('students').select('*').order('id');
+    const { data: attendance } = await supabase.from('attendance').select('*');
+    attendanceData = students.map(s => {
+        const record = attendance.find(a => a.student_id === s.id) || {};
+        return {
+            id: s.id,
+            first_name: s.first_name,
+            last_name: s.last_name,
+            check_in: record.check_in ? new Date(record.check_in).toLocaleTimeString() : '',
+            check_out: record.check_out ? new Date(record.check_out).toLocaleTimeString() : '',
+            check_in_time: record.check_in,
+            check_out_time: record.check_out,
+            parents: record.parent ? [record.parent] : [],
+            selectedParent: record.parent || ''
+        }
+    });
+    renderTable();
+}
+
+async function addStudent(first, last) {
+    const { data, error } = await supabase.from('students').insert({ first_name: first, last_name: last }).select();
+    if (error) { alert(error.message); return; }
+    attendanceData.push({ id: data[0].id, first_name: first, last_name: last, check_in: '', check_out: '', parents: [], selectedParent: '' });
+    renderTable();
+}
+
+async function checkIn(id) {
+    const student = attendanceData.find(s=>s.id===id);
+    const teacherInitials = getTeacherInitials();
+    if(!teacherInitials){ alert("Enter teacher name first"); return; }
+    const time = new Date().toISOString();
+    await supabase.from('attendance').upsert({ student_id: id, check_in: time, teacher: teacherInitials }, { onConflict: 'student_id' });
+    student.check_in = new Date(time).toLocaleTimeString() + ` (${teacherInitials})`;
+    student.check_out = '';
+    student.check_in_time = time;
+    renderTable();
+}
+
+async function checkOut(id) {
+    const student = attendanceData.find(s=>s.id===id);
+    const teacherInitials = getTeacherInitials();
+    if(!teacherInitials || !student.selectedParent){ alert("Enter teacher and parent"); return; }
+    const time = new Date().toISOString();
+    await supabase.from('attendance').upsert({ student_id: id, check_out: time, teacher: teacherInitials, parent: student.selectedParent }, { onConflict: 'student_id' });
+    student.check_out = new Date(time).toLocaleTimeString() + ` (${teacherInitials} / ${student.selectedParent})`;
+    student.check_out_time = time;
+    renderTable();
+}
+
+async function deleteStudent(id) {
+    if(confirm("Delete this student?")) {
+        await supabase.from('attendance').delete().eq('student_id', id);
+        await supabase.from('students').delete().eq('id', id);
+        attendanceData = attendanceData.filter(s=>s.id!==id);
+        renderTable();
+    }
+}
+
+async function deleteAllStudents() {
+    if(confirm("Delete ALL students?")) {
+        await supabase.from('attendance').delete();
+        await supabase.from('students').delete();
+        attendanceData = [];
+        renderTable();
+    }
+}
+
+/* ---------------- Render Table ---------------- */
+function renderTable() {
+    attendanceTable.innerHTML = '';
+    attendanceData.forEach((s, index)=>{
+        const row = attendanceTable.insertRow();
+        row.id = 'student-'+s.id;
+        if(s.check_in && !s.check_out) row.classList.add('checked-in');
+        if(s.check_out) row.classList.add('checked-out');
+        row.innerHTML = `
+            <td>${index+1}</td>
+            <td>${s.first_name}</td>
+            <td>${s.last_name}</td>
+            <td>
+                <button class="check-btn" onclick="checkIn(${s.id})">Check In ⬆️</button>
+                <button class="check-btn" onclick="checkOut(${s.id})">Check Out ⬇️</button>
+                <button class="delete-btn" onclick="deleteStudent(${s.id})">Delete</button>
+            </td>
+            <td>${s.check_in}</td>
+            <td>${s.check_out}</td>
+            <td>
+                <select class="parent-select" onchange="updateParent(${s.id}, this.value)">
+                    <option value="">Select Parent</option>
+                    ${s.parents.map(p=>`<option value="${p}" ${p===s.selectedParent?'selected':''}>${p}</option>`).join('')}
+                </select>
+                <button class="small-btn" onclick="addParent(${s.id})">Add Parent</button>
+            </td>
+        `;
+    });
+    updateCounts();
+}
+
+function updateParent(id, value) {
+    const student = attendanceData.find(s => s.id === id);
+    student.selectedParent = value;
+    renderTable();
+}
+
+function addParent(id){
+    const name = prompt("Enter parent's name:");
+    if(!name) return;
+    const student = attendanceData.find(s=>s.id===id);
+    if(!student.parents.includes(name)) student.parents.push(name);
+    student.selectedParent = name;
+    renderTable();
+}
+
+/* ---------------- Export Functions ---------------- */
+function chooseReportType(){ document.getElementById('reportModal').style.display='flex'; }
+function closeModal(){ document.getElementById('reportModal').style.display='none'; }
+
+function filterAttendance(range){
+    const now = new Date();
+    return attendanceData.filter(a=>{
+        const ci = a.check_in_time ? new Date(a.check_in_time) : null;
+        if(!ci) return false;
+        switch(range){
+            case'daily': return ci.toDateString()===now.toDateString();
+            case'weekly': {
+                const day = now.getDay();
+                const start = new Date(now); start.setDate(now.getDate()-day+1);
+                const end = new Date(start); end.setDate(start.getDate()+4);
+                return ci>=start && ci<=end;
+            }
+            case'monthly': return ci.getMonth()===now.getMonth() && ci.getFullYear()===now.getFullYear();
+            case'lastMonth': {
+                const lastMonth = new Date(now.getFullYear(), now.getMonth()-1, 1);
+                return ci.getMonth()===lastMonth.getMonth() && ci.getFullYear()===lastMonth.getFullYear();
+            }
+        }
+    });
+}
+
+function exportAttendance(type){
+    const data = filterAttendance(type).map(s=>({
+        'First Name': s.first_name,
+        'Last Name': s.last_name,
+        'Check-In': s.check_in,
+        'Check-Out': s.check_out,
+        'Parent': s.selectedParent,
+        'Teacher': s.check_in ? s.check_in.split(' ')[1].replace(/[()]/g,'') : ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    XLSX.writeFile(wb, `Attendance_${type}.xlsx`);
+}
+
+function exportPDF(type){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const data = filterAttendance(type);
+    doc.setFontSize(16);
+    doc.text(`Attendance Report - ${type}`, 10, 20);
+    doc.setFontSize(12);
+    const headers=["#","First Name","Last Name","Check-In","Check-Out","Parent","Teacher"];
+    const rows = data.map((s,i)=>[i+1,s.first_name,s.last_name,s.check_in,s.check_out,s.selectedParent,s.check_in?s.check_in.split(' ')[1].replace(/[()]/g,''):'']);
+    doc.autoTable({ head:[headers], body:rows, startY:30 });
+    doc.save(`Attendance_${type}.pdf`);
+}
+
+/* ---------------- Add Student Prompt ---------------- */
+function addStudentPrompt(){
+    const full = prompt("Enter full name:");
+    if(!full) return;
+    const parts = full.trim().split(' ');
+    if(parts.length<2){ alert("Enter first and last name"); return; }
+    addStudent(parts[0], parts.slice(1).join(''));
+}
+
+/* ---------------- Excel Import ---------------- */
+function importExcel(){
+    const file = document.getElementById('excelFile').files[0];
+    if(!file){ alert("Select file"); return; }
+    const reader = new FileReader();
+    reader.onload=(e)=>{
+        try{
+            const data = new Uint8Array(e.target.result);
+            const wb = XLSX.read(data,{type:'array'});
+            const sheet = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+            if(!sheet[0]['First Name'] || !sheet[0]['Last Name']) throw "Invalid format";
+            sheet.forEach(r=>addStudent(r['First Name'], r['Last Name']));
+        }catch(err){
+            alert("Invalid Excel format. Columns must be 'First Name' and 'Last Name'. Please import again.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+/* ---------------- Clear Timestamps ---------------- */
+async function manualReset(){
+    if(confirm("Clear all timestamps?")){
+        for(const s of attendanceData){
+            s.check_in=''; s.check_out=''; s.check_in_time=''; s.check_out_time='';
+            await supabase.from('attendance').update({check_in:null,check_out:null}).eq('student_id',s.id);
+        }
+        renderTable();
+    }
+}
+
+/* ---------------- Init ---------------- */
+fetchData();
+</script>
+</body>
+</html>
