@@ -4,132 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Before & After Care Attendance</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
-<style>
-body { font-family: Arial, sans-serif; margin: 20px; }
-header { text-align: center; margin-bottom: 20px; }
-.top-bar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
-.left-panel, .center-panel, .right-panel { display: flex; flex-direction: column; gap: 10px; }
-input, select, button { padding: 5px; margin-right: 5px; }
-button { cursor: pointer; }
-.check-btn { background-color: #007BFF; color: white; border: none; font-size: 16px; padding: 8px 15px; margin-right: 5px; border-radius: 5px; }
-.clear-btn, .delete-btn, .small-btn { background-color: #ccc; color: black; border: none; font-size: 12px; padding: 4px 8px; border-radius: 3px; margin-right: 5px; }
-.daily-report-btn { background-color:#f8d7da; color:#721c24; }
-.reset-btn { background-color: #dc3545; color: white; border: none; font-size: 12px; padding: 6px 10px; border-radius: 5px; cursor: pointer; transition: background-color 0.2s ease; }
-.reset-btn:hover { background-color: #b52a37; }
-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
-.checked-in { background-color: #d4edda; }
-.checked-out { background-color: #f8d7da; }
-.import-section { border: 2px solid #007BFF; padding: 20px; text-align: center; width: 50%; margin: 30px auto 0 auto; border-radius: 10px; }
-.export-buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 5px; flex-wrap: wrap; }
-/* Check-in counter styles */
-.checkin-counter {
-    font-size: 20px;
-    font-weight: bold;
-    padding: 8px 15px;
-    border-radius: 8px;
-    text-align: center;
-    display: inline-block;
-    min-width: 140px;
-    border: 2px solid transparent;
-    transition: all 0.3s ease;
-}
-.checkin-green {
-    color: #155724;
-    background-color: #d4edda;
-    border-color: #c3e6cb;
-}
-.checkin-red {
-    color: #721c24;
-    background-color: #f8d7da;
-    border-color: #f5c6cb;
-}
-/* Modal styles */
-#reportModal {
-    display:none; 
-    position:fixed; top:0; left:0; width:100%; height:100%; 
-    background:rgba(0,0,0,0.5); justify-content:center; align-items:center; z-index:1000;
-}
-#reportModal div {
-    background:white; padding:20px; border-radius:10px; text-align:center; min-width:200px;
-}
-#reportModal button { margin:5px; padding:6px 12px; font-size:14px; cursor:pointer; border-radius:5px; }
-</style>
-</head>
-<body>
-
-<header>
-    <h1>Before & After Care Attendance</h1>
-</header>
-
-<div class="top-bar">
-    <div class="left-panel">
-        <label>Teacher Name: <input type="text" id="teacherName" placeholder="Full Name"></label>
-        <button style="background-color:#007BFF; color:white; font-size:16px; padding:8px 15px; border-radius:5px;" onclick="addStudentPrompt()">Add Student</button>
-    </div>
-    <div class="center-panel" style="align-items:center;">
-        <div id="checkinCounter" class="checkin-counter checkin-red">
-            Checked In: <span id="checkedInCount">0</span>
-        </div>
-    </div>
-    <div class="right-panel" style="align-items:flex-end;">
-        <div>
-            <strong>Today's Date:</strong> <span id="currentDate"></span>
-        </div>
-        <div class="export-buttons">
-            <button class="daily-report-btn" onclick="chooseReportType()">Export</button>
-            <button class="reset-btn" onclick="manualReset()">⚠ Clear Timestamps</button>
-            <button class="reset-btn" onclick="deleteAllStudents()">🗑 Delete All Students</button>
-        </div>
-    </div>
-</div>
-
-<table id="attendanceTable">
-    <thead>
-        <tr>
-            <th>#</th>
-            <th>First Name</th>
-            <th>Last Name</th>
-            <th>Actions</th>
-            <th>Check-In</th>
-            <th>Check-Out</th>
-            <th>Parent</th>
-        </tr>
-    </thead>
-    <tbody></tbody>
-</table>
-
-<div class="import-section">
-    <h3>Import Students from Excel</h3>
-    <input type="file" id="excelFile" accept=".xlsx,.xls">
-    <button onclick="importExcel()">Import Excel</button>
-</div>
-
-<!-- Report Modal -->
-<div id="reportModal">
-  <div>
-    <h3>Select Export Type</h3>
-    <button onclick="exportPDF('daily'); closeModal()">PDF - Daily</button>
-    <button onclick="exportPDF('weekly'); closeModal()">PDF - Weekly</button>
-    <button onclick="exportPDF('monthly'); closeModal()">PDF - Monthly</button>
-    <button onclick="exportPDF('lastMonth'); closeModal()">PDF - Last Month</button>
-    <button onclick="exportAttendance('daily'); closeModal()">Excel - Daily</button>
-    <button onclick="exportAttendance('weekly'); closeModal()">Excel - Weekly</button>
-    <button onclick="exportAttendance('monthly'); closeModal()">Excel - Monthly</button>
-    <button onclick="exportAttendance('lastMonth'); closeModal()">Excel - Last Month</button>
-    <button onclick="closeModal()">Cancel</button>
-  </div>
-</div>
-
-<script>
-/* ---------------- Supabase Setup ---------------- */
-const SUPABASE_URL = 'https://gaaqhwkxypzxejerjwqc.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdhYXFod2t4eXB6eGVqZXJqd3FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzNDAwMTUsImV4cCI6MjA3MTkxNjAxNX0.yshLqnf9o0JQ_1QGPuhpeYgDloRHmeqMMX6WxT_3mbQ';
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+<script type="module">
+import { supabase } from './supabase.js';
 
 /* ---------------- State ---------------- */
 let attendanceData = [];
@@ -245,7 +124,7 @@ function renderTable() {
             <td>${s.check_in}</td>
             <td>${s.check_out}</td>
             <td>
-                <select class="parent-select" onchange="s.selectedParent=this.value; renderTable();">
+                <select class="parent-select" onchange="updateParent(${s.id}, this.value)">
                     <option value="">Select Parent</option>
                     ${s.parents.map(p=>`<option value="${p}" ${p===s.selectedParent?'selected':''}>${p}</option>`).join('')}
                 </select>
@@ -254,6 +133,12 @@ function renderTable() {
         `;
     });
     updateCounts();
+}
+
+function updateParent(id, value) {
+    const student = attendanceData.find(s => s.id === id);
+    student.selectedParent = value;
+    renderTable();
 }
 
 function addParent(id){
@@ -361,6 +246,5 @@ async function manualReset(){
 /* ---------------- Init ---------------- */
 fetchData();
 </script>
-
 </body>
 </html>
